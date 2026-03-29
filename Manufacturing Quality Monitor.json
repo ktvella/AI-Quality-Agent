@@ -86,7 +86,7 @@
     },
     {
       "parameters": {
-        "sendTo": "kvjunk23@gmail.com",
+        "sendTo": ['your email here'],
         "subject": "=Manufacturing Quality Report - {{ $('Generate Excel').first().json.filename }}",
         "message": "={{ $('Generate Excel').item.json.ai_insights.replace(/### (.*?)(\\n|$)/g, '<h3>$1</h3>').replace(/\\*\\*(.*?)\\*\\*/g, '<b>$1</b>').replace(/\\n- /g, '<br>• ').replace(/\\n/g, '<br>') }}",
         "options": {
