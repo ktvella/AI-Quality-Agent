@@ -1,0 +1,278 @@
+{
+  "name": "Manufacturing Quality Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "1c1c8a22-77c1-41d9-bd15-f1945ae996a6",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://api.fda.gov/device/recall.json?limit=100&sort=event_date_initiated:desc",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "31a8179f-6e55-4284-b73d-d3f6950ed2be",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a manufacturing data analyst assistant. You will receive EDA results \nfrom a product recall dataset that is being used as a proxy for manufacturing \ndefect data. Interpret the results clearly and concisely for a plant manager."
+            },
+            {
+              "content": "=Here are today's EDA results from the manufacturing quality pipeline:\n\nSummary: {{ JSON.stringify($json.summary) }}\nTrend: {{ JSON.stringify($json.trend) }}\nOutliers: {{ JSON.stringify($json.outliers) }}\nTop reasons: {{ JSON.stringify($json.reason_breakdown) }}\nTop firms: {{ JSON.stringify($json.firm_breakdown) }}\n\nPlease provide:\n1. A plain English interpretation of what these numbers mean\n2. Any recommended actions based on the outliers detected\n3. A short executive summary paragraph suitable for an email body"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        832,
+        0
+      ],
+      "id": "ddcb57cf-65a7-488a-817a-9e6a2ea91be3",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "9gVbLZ5gHMXHotXi",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiRaw = $('Message a model').first().json;\nconst aiResponse = aiRaw.output[0].content[0].text;\n\nconst edaNode = $('Code2').first().json;\n\nconst today = new Date();\nconst startOfYear = new Date(today.getFullYear(), 0, 1);\nconst weekNum = Math.ceil(((today - startOfYear) / 86400000 + 1) / 7);\nconst dayName = today.toLocaleDateString('en-US', { weekday: 'long' });\nconst filename = `manufacturing_eda_W${weekNum}_${dayName}.xlsx`;\n\nconst excelRows = edaNode.raw.map(r => ({\n  json: {\n    date: r.date,\n    product: r.product,\n    reason: r.reason,\n    classification: r.classification,\n    status: r.status,\n    recalling_firm: r.recalling_firm\n  }\n}));\n\nreturn [{\n  json: {\n    filename: filename,\n    ai_insights: aiResponse,\n    rows: excelRows.map(r => r.json)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        0
+      ],
+      "id": "c7d7802c-df29-41f9-b473-c2847c8e2add",
+      "name": "Generate Excel"
+    },
+    {
+      "parameters": {
+        "sendTo": "kvjunk23@gmail.com",
+        "subject": "=Manufacturing Quality Report - {{ $('Generate Excel').first().json.filename }}",
+        "message": "={{ $('Generate Excel').item.json.ai_insights.replace(/### (.*?)(\\n|$)/g, '<h3>$1</h3>').replace(/\\*\\*(.*?)\\*\\*/g, '<b>$1</b>').replace(/\\n- /g, '<br>• ').replace(/\\n/g, '<br>') }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {}
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1808,
+        0
+      ],
+      "id": "b2f7d80b-e195-42ef-b56f-fae98a88c759",
+      "name": "Send a message",
+      "webhookId": "62aa0d3f-7e74-4888-a89e-446e7cfa61b1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "QCAyIwYoyg5jXIZc",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "fileName": "={{ $('Generate Excel').item.json.filename }}",
+          "sheetName": "Recall Data"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        0
+      ],
+      "id": "c7802365-93b1-4ea6-97c5-5e34eb2f4db2",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "raw = _items[0][\"json\"][\"results\"]\n\ncleaned = []\nfor record in raw:\n    cleaned.append({\n        \"json\": {\n            \"date\": record.get(\"event_date_initiated\", \"unknown\"),\n            \"product\": record.get(\"product_description\", \"unknown\")[:80].replace(\"\\n\", \" \").replace(\"\\r\", \" \"),\n            \"reason\": record.get(\"reason_for_recall\", \"unknown\")[:80].replace(\"\\n\", \" \").replace(\"\\r\", \" \"),\n            \"classification\": record.get(\"classification\", \"unknown\"),\n            \"status\": record.get(\"status\", \"unknown\"),\n            \"recalling_firm\": record.get(\"recalling_firm\", \"unknown\")[:50].replace(\"\\n\", \" \")\n        }\n    })\n\nreturn cleaned"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "3df5bfd5-5078-4955-b8ed-512d7e614321",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "records = [item[\"json\"] for item in _items]\n\n# --- Trend over time ---\ndate_counts = {}\nfor r in records:\n    date = r.get(\"date\", \"unknown\")\n    date_counts[date] = date_counts.get(date, 0) + 1\n\ntrend = [{\"date\": d, \"recall_count\": c} for d, c in sorted(date_counts.items())]\n\n# --- Reason breakdown ---\nreason_counts = {}\nfor r in records:\n    reason = r.get(\"reason\", \"unknown\")[:50]\n    reason_counts[reason] = reason_counts.get(reason, 0) + 1\n\n# --- Firm breakdown ---\nfirm_counts = {}\nfor r in records:\n    firm = r.get(\"recalling_firm\", \"unknown\")\n    firm_counts[firm] = firm_counts.get(firm, 0) + 1\n\n# --- Outlier flagging ---\ncounts = list(date_counts.values())\navg = sum(counts) / len(counts) if counts else 0\nstd = (sum((x - avg) ** 2 for x in counts) / len(counts)) ** 0.5 if counts else 0\nthreshold = avg + (2 * std)\n\noutliers = [\n    {\"date\": d, \"recall_count\": c, \"flag\": \"HIGH VOLUME\"}\n    for d, c in date_counts.items()\n    if c > threshold\n]\n\n# --- Sort breakdowns ---\nsorted_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:10]\nsorted_firms = sorted(firm_counts.items(), key=lambda x: x[1], reverse=True)[:10]\n\n# --- Summary stats ---\nsummary = {\n    \"total_recalls\": len(records),\n    \"unique_dates\": len(date_counts),\n    \"avg_recalls_per_day\": round(avg, 2),\n    \"std_dev\": round(std, 2),\n    \"outlier_threshold\": round(threshold, 2),\n    \"outliers_detected\": len(outliers),\n    \"top_reason\": sorted_reasons[0][0] if sorted_reasons else \"none\",\n    \"top_firm\": sorted_firms[0][0] if sorted_firms else \"none\"\n}\n\nreturn [{\n    \"json\": {\n        \"summary\": summary,\n        \"trend\": trend,\n        \"outliers\": outliers,\n        \"reason_breakdown\": [{\"reason\": r, \"count\": c} for r, c in sorted_reasons],\n        \"firm_breakdown\": [{\"firm\": f, \"count\": c} for f, c in sorted_firms],\n        \"raw\": records\n    }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "353c4e79-99e1-4c68-84e5-07c2a0bcf5c8",
+      "name": "Code2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nreturn data.rows.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        0
+      ],
+      "id": "881b67d2-6064-4b0a-bf23-7551eaed6803",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Generate Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Excel": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d3bfba1f-5e9a-43fd-aadf-561f06bc8d8a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e186cf5f875be6004e003ddc62ca54e3b23f39b7277428e183bd881dba93d987"
+  },
+  "id": "OPj6kXhkhL9gcqFj",
+  "tags": []
+}
